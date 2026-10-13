@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Gestor de Concursos</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme:light;
+  --bg:#f3f5f8; --surface:#ffffff; --sunken:#e9edf3; --line:#d5dbe5;
+  --fg:#18202e; --muted:#5b667a; --accent:#1f4fd8; --accent-fg:#ffffff;
+  --ok:#17794a; --ok-bg:#dcf2e6; --warn:#8a5a00; --warn-bg:#fbeccb; --bad:#b3261e; --bad-bg:#fbdedb;
+  --info:#2a4f9c; --info-bg:#dfe8fa; --neutral-bg:#e4e8ef;
+  --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-display:"IBM Plex Sans Condensed","IBM Plex Sans",system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#10141c; --surface:#171d28; --sunken:#0d1118; --line:#2a3345;
+  --fg:#e6eaf2; --muted:#93a0b8; --accent:#6c93ff; --accent-fg:#0b1020;
+  --ok:#5fd39a; --ok-bg:#12372a; --warn:#f0c264; --warn-bg:#3a2d0c; --bad:#ff8c84; --bad-bg:#42191a;
+  --info:#9db8ff; --info-bg:#1b2a4d; --neutral-bg:#222b3b; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#10141c; --surface:#171d28; --sunken:#0d1118; --line:#2a3345;
+  --fg:#e6eaf2; --muted:#93a0b8; --accent:#6c93ff; --accent-fg:#0b1020;
+  --ok:#5fd39a; --ok-bg:#12372a; --warn:#f0c264; --warn-bg:#3a2d0c; --bad:#ff8c84; --bad-bg:#42191a;
+  --info:#9db8ff; --info-bg:#1b2a4d; --neutral-bg:#222b3b; color-scheme:dark;}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:14px;line-height:1.45;padding-inline:16px;padding-block:20px 48px}
+.wrap{max-width:1200px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1,h2,h3{font-family:var(--font-display);margin:0;text-wrap:balance;letter-spacing:.01em}
+h1{font-size:26px}
+h2{font-size:17px}
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.top p{margin:4px 0 0;color:var(--muted);max-width:60ch}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+button,select,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:var(--surface);padding:8px 14px;border-radius:6px;font-weight:500}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+button.primary:hover{filter:brightness(1.08)}
+button.danger{color:var(--bad)}
+button:disabled{opacity:.55;cursor:default}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input,select,textarea{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:8px 10px;min-width:0}
+textarea{resize:vertical}
+label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:500;min-width:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px}
+.intake{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px}
+.intake .col{display:flex;flex-direction:column;gap:10px;min-width:0}
+.hint{font-size:12px;color:var(--muted);margin:0}
+.status-line{font-size:13px;min-height:20px}
+.status-line.err{color:var(--bad)}
+.row-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+@media (max-width:760px){.intake{grid-template-columns:1fr}}
+
+details.settings{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 16px}
+details.settings summary{cursor:pointer;font-weight:600}
+details.settings .grid{margin-top:12px}
+
+.drafts{display:flex;flex-direction:column;gap:12px}
+.drafts-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.card-form{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.card-form header strong{font-family:var(--font-display);font-size:15px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+.grid .wide{grid-column:span 2}
+.grid .full{grid-column:1/-1}
+@media (max-width:480px){.grid .wide{grid-column:1/-1}}
+
+.stats{display:flex;gap:10px;flex-wrap:wrap}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 14px;min-width:130px;flex:1}
+.stat b{display:block;font-family:var(--font-mono);font-size:22px;font-weight:500;font-variant-numeric:tabular-nums}
+.stat span{font-size:12px;color:var(--muted)}
+.stat.alert b{color:var(--bad)}
+
+.filters{display:grid;grid-template-columns:minmax(0,2fr) repeat(3,minmax(0,1fr));gap:10px}
+@media (max-width:760px){.filters{grid-template-columns:1fr 1fr}.filters label:first-child{grid-column:1/-1}}
+.table-wrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;min-width:980px}
+th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);background:var(--sunken);padding:9px 10px;white-space:nowrap;font-weight:600}
+td{padding:9px 10px;border-top:1px solid var(--line);vertical-align:top}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--sunken)}
+td.num,th.num{text-align:right}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:12.5px;white-space:nowrap}
+.org{font-weight:600}
+.sub{color:var(--muted);font-size:12px}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap;background:var(--neutral-bg)}
+.pill.s-open{background:var(--ok-bg);color:var(--ok)}
+.pill.s-prev{background:var(--warn-bg);color:var(--warn)}
+.pill.s-pub{background:var(--info-bg);color:var(--info)}
+.pill.s-end{background:var(--neutral-bg);color:var(--muted)}
+.deadline-soon{color:var(--bad);font-weight:600}
+.empty{padding:36px 16px;text-align:center;color:var(--muted)}
+.empty b{display:block;color:var(--fg);font-family:var(--font-display);font-size:17px;margin-bottom:4px}
+.edit-slot:empty{display:none}
+a{color:var(--accent)}
+.foot{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>Gestor de Concursos</h1>
+      <p>Cole o edital (texto ou PDF) e um modelo Llama gratuito preenche banca, vagas, datas e remuneração. Os dados ficam salvos neste navegador.</p>
+    </div>
+    <div class="actions">
+      <button id="btn-xlsx">Exportar Excel</button>
+      <button id="btn-csv">Exportar CSV</button>
+      <button id="btn-backup">Backup (.json)</button>
+      <button id="btn-restore">Restaurar backup</button>
+      <input id="in-restore" type="file" accept=".json,application/json" hidden>
+      <button id="btn-theme" aria-label="Alternar tema">Tema</button>
+    </div>
+  </div>
+
+  <details class="settings" id="settings">
+    <summary>Configurar modelo de IA (Llama gratuito)</summary>
+    <div class="grid">
+      <label for="cfg-preset">Provedor
+        <select id="cfg-preset">
+          <option value="groq">Groq (grátis) – Llama 3.3 70B</option>
+          <option value="openrouter">OpenRouter (modelos :free)</option>
+          <option value="ollama">Ollama no seu computador</option>
+          <option value="custom">Outro (compatível com OpenAI)</option>
+        </select>
+      </label>
+      <label for="cfg-url" class="wide">Endereço da API<input id="cfg-url" type="url"></label>
+      <label for="cfg-model" class="wide">Modelo<input id="cfg-model" type="text"></label>
+      <label for="cfg-key" class="wide">Chave da API<input id="cfg-key" type="password" autocomplete="off" placeholder="gsk_..."></label>
+      <div class="full">
+        <p class="hint">Crie uma chave grátis em console.groq.com/keys. Ela fica só neste navegador (localStorage) e é enviada apenas ao provedor escolhido. Não coloque a chave no repositório.</p>
+      </div>
+    </div>
+  </details>
+
+  <section class="panel intake" aria-labelledby="h-new">
+    <div class="col">
+      <h2 id="h-new">Novo concurso</h2>
+      <label for="in-text">Texto do edital ou descrição
+        <textarea id="in-text" rows="7" placeholder="Cole aqui o edital (ou trechos: vagas, cargos, banca, datas, remuneração) ou escreva uma descrição livre."></textarea>
+      </label>
+    </div>
+    <div class="col">
+      <label for="in-pdf">Ou envie o PDF do edital
+        <input id="in-pdf" type="file" accept="application/pdf">
+      </label>
+      <label for="in-link">Link do edital (opcional)
+        <input id="in-link" type="url" placeholder="https://...">
+      </label>
+      <p class="hint">O link só é salvo na coluna "Link do Edital". A página não consegue abrir sites; os dados vêm do texto ou do PDF.</p>
+      <div class="row-actions">
+        <button id="btn-extract" class="primary">Extrair dados</button>
+        <button id="btn-manual">Preencher manualmente</button>
+      </div>
+      <div id="extract-status" class="status-line" role="status"></div>
+    </div>
+  </section>
+
+  <div id="drafts"></div>
+  <div id="edit-slot" class="edit-slot"></div>
+
+  <section aria-labelledby="h-list" style="display:flex;flex-direction:column;gap:12px">
+    <h2 id="h-list">Concursos cadastrados</h2>
+    <div class="stats" id="stats"></div>
+    <div class="filters">
+      <label for="f-q">Buscar<input id="f-q" type="search" placeholder="Órgão, cargo, banca, UF"></label>
+      <label for="f-status">Status<select id="f-status"></select></label>
+      <label for="f-banca">Banca<select id="f-banca"></select></label>
+      <label for="f-vou">Vou fazer?<select id="f-vou"></select></label>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>ID</th><th>Órgão / Cargo</th><th>Banca</th><th>UF</th>
+        <th class="num">Vagas</th><th class="num">Remuneração</th><th>Status</th>
+        <th>Inscrições</th><th>Prova</th><th>Vou?</th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table></div>
+  </section>
+  <p class="foot">Os dados ficam no armazenamento deste navegador. Limpar os dados do site apaga tudo; use "Backup (.json)" para guardar uma cópia.</p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
