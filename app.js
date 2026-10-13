@@ -38,7 +38,7 @@ HEADERS.prova="Data da Prova";
 var NUMERIC={vagasAC:1,vagasCotas:1,remuneracao:1,beneficios:1,carga:1,taxa:1};
 
 var PRESETS={
-  groq:{url:"https://api.groq.com/openai/v1/chat/completions",model:"llama-3.3-70b-versatile",ph:"gsk_..."},
+  groq:{url:"https://api.groq.com/openai/v1/chat/completions",model:"openai/gpt-oss-120b",ph:"gsk_..."},
   openrouter:{url:"https://openrouter.ai/api/v1/chat/completions",model:"meta-llama/llama-3.3-70b-instruct:free",ph:"sk-or-..."},
   ollama:{url:"http://localhost:11434/v1/chat/completions",model:"llama3.1",ph:"(não precisa de chave)"},
   custom:{url:"",model:"",ph:""}
@@ -157,13 +157,13 @@ function saveAllDrafts(){
 /* ---------- configuração do modelo ---------- */
 function loadCfg(){var c={};try{c=JSON.parse(lsGet(CFG)||"{}")}catch(e){}
   c.preset=c.preset||"groq";
-  var p=PRESETS[c.preset];c.url=c.url||p.url;c.model=c.model||p.model;c.key=c.key||"";return c}
+  var p=PRESETS[c.preset];if(c.model==="llama-3.3-70b-versatile")c.model="";c.url=c.url||p.url;c.model=c.model||p.model;c.key=c.key||"";return c}
 function applyCfgToUI(c){$("cfg-preset").value=c.preset;$("cfg-url").value=c.url;$("cfg-model").value=c.model;$("cfg-key").value=c.key;$("cfg-key").placeholder=PRESETS[c.preset].ph}
 function readCfgFromUI(){return{preset:$("cfg-preset").value,url:$("cfg-url").value.trim(),model:$("cfg-model").value.trim(),key:$("cfg-key").value.trim()}}
 function saveCfg(){lsSet(CFG,JSON.stringify(readCfgFromUI()))}
 
 /* ---------- reduzir edital longo (limites do plano gratuito) ---------- */
-var MAX_CHARS=22000;
+var MAX_CHARS=16000;
 function condense(text){
   text=text.replace(/[ \t]+/g," ").replace(/\n{3,}/g,"\n\n");
   if(text.length<=MAX_CHARS)return text;
@@ -242,6 +242,7 @@ async function extract(){
     var m;
     if(e.status===401||e.status===403)m="Chave da API recusada. Confira a chave e o provedor.";
     else if(e.status===429)m="Limite gratuito atingido. Espere um minuto e tente de novo, ou use um trecho menor do edital.";
+    else if(e.status===404||/model/i.test(e.message||""))m="O modelo \""+cfg.model+"\" não está disponível nesta conta. Em \"Configurar modelo de IA\", troque por openai/gpt-oss-120b ou llama-3.1-8b-instant.";
     else if(e.status===413)m="O texto é grande demais para o plano gratuito. Cole só as partes principais do edital.";
     else if(e instanceof TypeError)m="Não consegui falar com o provedor ("+cfg.url+"). Confira a conexão e o endereço.";
     else m="Não foi possível extrair: "+e.message;
