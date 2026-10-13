@@ -28,10 +28,11 @@ var FIELDS=[
  ["vou","Vou fazer?","select",VOU],
  ["requisitos","Requisitos de Formação","textarea",null,"full"],
  ["disciplinas","Disciplinas de TI","textarea",null,"full"],
- ["link","Link do Edital","url",null,"full"]
+ ["link","Link do Edital","url",null,"full"],
+ ["obs","Observações (benefícios, notas)","textarea",null,"full"]
 ];
 /* ordem das colunas da aba Concursos da planilha de controle */
-var SHEET_ORDER=["id","orgao","cargo","banca","esfera","uf","modalidade","vagasAC","vagasCotas","cr","remuneracao","beneficios","carga","status","inicio","fim","prova","taxa","requisitos","subarea","disciplinas","vou","link"];
+var SHEET_ORDER=["id","orgao","cargo","banca","esfera","uf","modalidade","vagasAC","vagasCotas","cr","remuneracao","beneficios","carga","status","inicio","fim","prova","taxa","requisitos","subarea","disciplinas","vou","link","obs"];
 var HEADERS={id:"ID"};
 FIELDS.forEach(function(f){HEADERS[f[0]]=f[1]});
 HEADERS.prova="Data da Prova";
@@ -48,7 +49,7 @@ var $=function(id){return document.getElementById(id)};
 var rows=[], drafts=[];
 
 /* ---------- armazenamento local ---------- */
-var KEY="concursos.v1", CFG="concursos.cfg.v1";
+var KEY="concursos.v1", CFG="concursos.cfg.v1", DRAFT="concursos.draft.v1";
 function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
 function lsSet(k,v){try{localStorage.setItem(k,v);return true}catch(e){return false}}
 function load(){try{rows=JSON.parse(lsGet(KEY)||"[]")}catch(e){rows=[]}if(!Array.isArray(rows))rows=[]}
@@ -76,7 +77,6 @@ function fmtDate(s){if(!s)return"";var p=String(s).split("-");return p.length===
 function fmtBRL(n){return(n===""||n==null||isNaN(n))?"":Number(n).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}
 function daysTo(s){if(!s)return null;var d=new Date(s+"T00:00:00");var t=new Date();t.setHours(0,0,0,0);return Math.round((d-t)/864e5)}
 function totalVagas(r){return(+r.vagasAC||0)+(+r.vagasCotas||0)}
-function setStatus(t,err){var s=$("extract-status");s.textContent=t;s.className="status-line"+(err?" err":"")}
 
 /* ---------- formulário ---------- */
 var formSeq=0;
@@ -124,9 +124,10 @@ function buildForm(data,title,onSave,saveLabel,onCancel,onDelete){
 }
 
 /* ---------- rascunhos ---------- */
-function renderDrafts(){
+function saveDrafts(){lsSet(DRAFT,JSON.stringify({drafts:drafts,text:$("in-text").value,link:$("in-link").value}))}
+function renderDrafts(noScroll){
   var box=$("drafts");box.textContent="";
-  if(!drafts.length)return;
+  if(!drafts.length){saveDrafts();return}
   box.append(el("div",{class:"drafts-head"},[
     el("h2",{text:drafts.length===1?"Revise e salve o concurso":"Revise e salve os "+drafts.length+" cargos encontrados"}),
     el("div",{class:"row-actions"},[
@@ -142,7 +143,8 @@ function renderDrafts(){
     list.append(card);
   });
   box.append(list);
-  box.scrollIntoView({behavior:"smooth",block:"start"});
+  if(!noScroll)box.scrollIntoView({behavior:"smooth",block:"start"});
+  saveDrafts();
 }
 function readDraftForms(skip){
   document.querySelectorAll("#drafts .card-form").forEach(function(c,i){if(i!==skip)drafts[i]=c._collect()});
@@ -162,36 +164,55 @@ function applyCfgToUI(c){$("cfg-preset").value=c.preset;$("cfg-url").value=c.url
 function readCfgFromUI(){return{preset:$("cfg-preset").value,url:$("cfg-url").value.trim(),model:$("cfg-model").value.trim(),key:$("cfg-key").value.trim()}}
 function saveCfg(){lsSet(CFG,JSON.stringify(readCfgFromUI()))}
 
-/* ---------- reduzir edital longo (limites do plano gratuito) ---------- */
-var MAX_CHARS=12000;
-function condense(text){
+/* ---------- selecionar trechos do edital (limites do plano gratuito) ---------- */
+var MAX_CHARS=11000;
+var TOPIC_GERAL=/(banca|organizad|realiza[çc][ãa]o|inscri|taxa|prova objetiva|cronograma|data da prova|benef[ií]cio|aux[ií]lio|vale[- ]|plano de sa[úu]de|assist[êe]ncia|gratifica|remunera|vencimento|sal[áa]rio|carga hor|jornada|regime|requisit|escolaridade|forma[çc][ãa]o|modalidade|presencial|remoto|teletrabalho|h[ií]brido|disciplina|conhecimentos|lota[çc][ãa]o|localidade)/i;
+var TOPIC_CARGOS=/(vaga|perfil|cargo|especialidade|reserva|cota|PcD|ampla|remunera|vencimento|sal[áa]rio|R\$|taxa|requisit|escolaridade|forma[çc][ãa]o|conhecimentos|disciplina|localidade|lota[çc][ãa]o)/i;
+function pick(text,re,budget){
   text=text.replace(/[ \t]+/g," ").replace(/\n{3,}/g,"\n\n");
-  if(text.length<=MAX_CHARS)return text;
-  var head=text.slice(0,7000), rest=text.slice(7000);
-  var re=/(vaga|remunera|sal[aá]rio|vencimento|inscri|taxa|prova|banca|organizad|cronograma|requisit|cargo|R\$|reserva|cota|carga hor|benef[ií]cio|auxílio|conhecimentos|inform[aá]tica|programa)/i;
-  var chunks=rest.split(/\n+/), picked=[], size=head.length;
-  for(var i=0;i<chunks.length&&size<MAX_CHARS;i++){
-    var c=chunks[i].trim();
-    if(c.length>3&&re.test(c)){c=c.slice(0,600);picked.push(c);size+=c.length+1}
+  if(text.length<=budget)return text;
+  var lines=text.split("\n"), keep={}, size=0, out=[], head=Math.floor(budget*0.25);
+  var h=text.slice(0,head);size=h.length;
+  var hl=h.split("\n").length;
+  for(var i=hl;i<lines.length&&size<budget;i++){
+    if(re.test(lines[i])){
+      for(var k=i;k<=Math.min(i+2,lines.length-1);k++){
+        if(!keep[k]){keep[k]=1;var l=lines[k].trim().slice(0,500);if(l){out.push(l);size+=l.length+1}}
+      }
+    }
   }
-  return head+"\n[...trechos selecionados do restante do edital...]\n"+picked.join("\n");
+  return h+"\n[...trechos selecionados do restante do edital...]\n"+out.join("\n");
 }
 
-/* ---------- extração com Llama ---------- */
-function buildPrompt(material){
-  return "Você extrai dados de editais de concursos públicos brasileiros para uma planilha de controle. "+
-  "Leia o material e responda APENAS com um objeto JSON no formato {\"cargos\":[ ... ]}, com um item por cargo/especialidade (se o edital tiver vários cargos, um item para cada). "+
-  "Campos de cada item (use \"\" quando a informação não estiver no material; nunca invente):\n"+
-  "orgao (string), cargo (string), banca (string, organizadora), esfera (\"Federal\"|\"Estadual\"|\"Municipal\"), uf (string), "+
-  "modalidade (\"Presencial\"|\"Híbrido\"|\"Remoto\"|\"Não informado\"), vagasAC (número, ampla concorrência), vagasCotas (número, soma das vagas reservadas), "+
-  "cr (string: \"Sim\", \"Não\" ou número de vagas de cadastro reserva), remuneracao (número em reais), beneficios (número mensal em reais), carga (horas semanais, número), "+
+/* ---------- extração com Llama / gpt-oss ---------- */
+function setStatus(t,err){var s=$("extract-status");s.textContent=t;s.className="status-line"+(err?" err":"")}
+var TODAY=function(){return new Date().toISOString().slice(0,10)};
+var REGRAS=
+"Regras: use \"\" quando a informação não estiver no material; nunca invente. Datas no formato AAAA-MM-DD. Números sem símbolo e sem separador de milhar (ex.: 8500.50). "+
+"AC = Ampla Concorrência (vagas abertas a todos, sem reserva). Cotas = vagas reservadas (PcD, pretos e pardos PP, indígenas PI, quilombolas PQ). ";
+function promptGeral(material){
+  return "Você extrai dados de editais de concursos públicos brasileiros. Responda APENAS com um objeto JSON com os campos abaixo, valendo para o concurso como um todo.\n"+REGRAS+"\n"+
+  "orgao (string), banca (organizadora/realizadora do concurso), esfera (\"Federal\"|\"Estadual\"|\"Municipal\"), "+
+  "modalidade (\"Presencial\"|\"Híbrido\"|\"Remoto\"|\"Não informado\", conforme o regime de trabalho), carga (horas semanais, número), "+
+  "beneficios (número: soma MENSAL em reais de todos os auxílios/benefícios em dinheiro citados, como alimentação/refeição, saúde, creche, transporte; some os valores; \"\" se não houver valores), "+
+  "beneficiosDetalhe (string: lista curta dos benefícios com valores, ex.: \"Auxílio-alimentação R$ 1.200; plano de saúde\"), "+
   "status (\"Previsto\"|\"Edital Publicado\"|\"Inscrições Abertas\"|\"Inscrições Encerradas\"|\"Prova Realizada\"|\"Homologado\"), "+
-  "inicio, fim, prova (datas AAAA-MM-DD), taxa (número em reais), requisitos (string), "+
-  "subarea (uma de: "+SUBAREA.join(", ")+"), disciplinas (string, disciplinas de TI cobradas, separadas por vírgula).\n"+
-  "Hoje é "+new Date().toISOString().slice(0,10)+"; use isso para decidir o status pelas datas. Números sem símbolo nem separador de milhar (ex.: 8500.50).\n\nMATERIAL:\n"+material;
+  "inicio (início das inscrições), fim (fim das inscrições), prova (data da prova objetiva), "+
+  "taxa (número: valor da taxa de inscrição; se variar por nível, use a de nível superior), "+
+  "disciplinas (string: disciplinas/conhecimentos de TI cobrados, separados por vírgula).\n"+
+  "Hoje é "+TODAY()+"; decida o status pelas datas.\n\nMATERIAL:\n"+material;
+}
+function promptCargos(material){
+  return "Você extrai dados de editais de concursos públicos brasileiros. Responda APENAS com JSON no formato {\"cargos\":[...]}, com UM item por cargo/perfil/especialidade.\n"+REGRAS+"\n"+
+  "Se o mesmo perfil tiver vagas em várias localidades, faça um único item, SOME as vagas e liste as localidades em uf (ex.: \"Fortaleza/CE, João Pessoa/PB\").\n"+
+  "Campos de cada item: cargo (nome do cargo e perfil/especialidade), uf (localidade/lotação), "+
+  "vagasAC (número: vagas imediatas de ampla concorrência, coluna AC), vagasCotas (número: soma das vagas imediatas reservadas PcD+PP+PI+PQ), "+
+  "cr (número: total de cadastro de reserva do cargo, incluindo ampla e cotas; \"\" se não houver), "+
+  "remuneracao (número em reais: remuneração/vencimento inicial do cargo), taxa (número: taxa de inscrição do cargo, se específica), "+
+  "requisitos (string: formação exigida), "+
+  "subarea (uma de: "+SUBAREA.join(", ")+").\n\nMATERIAL:\n"+material;
 }
 function salvage(content){
-  /* aceita JSON completo ou cortado: devolve os objetos de cargo que estiverem inteiros */
   try{var m=content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);if(m){var v=JSON.parse(m[0]);return Array.isArray(v)?v:(v.cargos||v.concursos||[v])}}catch(e){}
   var i=content.indexOf("[");if(i<0)return [];
   var out=[],depth=0,start=-1,inStr=false,esc=false;
@@ -204,26 +225,31 @@ function salvage(content){
   }
   return out;
 }
-async function callLlm(cfg,prompt,useFormat){
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
+async function callLlm(cfg,prompt,opts){
+  opts=opts||{};
   var headers={"Content-Type":"application/json"};
   if(cfg.key)headers.Authorization="Bearer "+cfg.key;
   var body={model:cfg.model,temperature:0,messages:[
     {role:"system",content:"Você responde somente com JSON válido, sem texto antes ou depois."},
     {role:"user",content:prompt}]};
   var reasoning=/gpt-oss|qwen3/i.test(cfg.model);
-  if(reasoning){body.reasoning_effort="low";body.max_completion_tokens=4500}
-  if(useFormat&&!reasoning&&(cfg.preset==="groq"||cfg.preset==="openrouter"))body.response_format={type:"json_object"};
+  if(reasoning){body.reasoning_effort="low";body.max_completion_tokens=opts.maxOut||4500}
+  if(opts.format!==false&&!reasoning&&(cfg.preset==="groq"||cfg.preset==="openrouter"))body.response_format={type:"json_object"};
   var res=await fetch(cfg.url,{method:"POST",headers:headers,body:JSON.stringify(body)});
   var raw=await res.text();
   if(!res.ok){
     var msg=raw,code="";try{var j=JSON.parse(raw).error;msg=j.message||raw;code=j.code||""}catch(e){}
-    if(useFormat&&code==="json_validate_failed")return callLlm(cfg,prompt,false);
+    if(res.status===429&&(opts.tries||0)<3){
+      var m=/try again in\s+(?:(\d+)m)?\s*([\d.]+)s/i.exec(msg), wait=m?((+m[1]||0)*60+parseFloat(m[2])+2):25;
+      for(var s=Math.ceil(wait);s>0;s--){setStatus("Limite gratuito: aguardando "+s+"s para continuar…",false);await sleep(1000)}
+      return callLlm(cfg,prompt,Object.assign({},opts,{tries:(opts.tries||0)+1}));
+    }
+    if(opts.format!==false&&code==="json_validate_failed")return callLlm(cfg,prompt,Object.assign({},opts,{format:false}));
     var err=new Error(msg);err.status=res.status;throw err;
   }
   var content=JSON.parse(raw).choices[0].message.content||"";
-  var list=salvage(content);
-  if(!list.length)throw new Error("O modelo não devolveu cargos legíveis. Tente de novo ou use um trecho menor do edital.");
-  return list;
+  return content;
 }
 function normalize(o,link){
   var d={};
@@ -241,23 +267,37 @@ function normalize(o,link){
   if(!d.vou)d.vou="Talvez";
   return d;
 }
+function parseObj(content){
+  try{var m=content.match(/\{[\s\S]*\}/);return m?JSON.parse(m[0]):{}}catch(e){return {}}
+}
 async function extract(){
   var text=$("in-text").value.trim(), link=$("in-link").value.trim();
   if(!text){setStatus("Cole o texto do edital, descreva o concurso ou envie o PDF.",true);return}
   var cfg=readCfgFromUI();saveCfg();
   if(!cfg.url||!cfg.model){setStatus("Configure o endereço da API e o modelo.",true);$("settings").open=true;return}
   if(cfg.preset!=="ollama"&&!cfg.key){setStatus("Informe sua chave da API em \"Configurar modelo de IA\".",true);$("settings").open=true;return}
-  var btn=$("btn-extract");btn.disabled=true;setStatus("Lendo o edital com "+cfg.model+"…",false);
+  var btn=$("btn-extract");btn.disabled=true;
   try{
-    var list=await callLlm(cfg,buildPrompt(condense(text)),true);
-    drafts=list.filter(function(o){return o&&typeof o==="object"}).map(function(o){return normalize(o,link)});
-    if(!drafts.length)throw new Error("Nenhum cargo encontrado no texto.");
-    setStatus(drafts.length+" cargo(s) extraído(s). Confira os campos antes de salvar.",false);
+    setStatus("Passo 1 de 2: dados gerais (banca, datas, benefícios)…",false);
+    var geralTxt=await callLlm(cfg,promptGeral(pick(text,TOPIC_GERAL,MAX_CHARS)),{maxOut:2500});
+    var geral=parseObj(geralTxt);
+    setStatus("Passo 2 de 2: cargos, vagas e remuneração…",false);
+    var cargosTxt=await callLlm(cfg,promptCargos(pick(text,TOPIC_CARGOS,MAX_CHARS)),{maxOut:6000});
+    var list=salvage(cargosTxt).filter(function(o){return o&&typeof o==="object"});
+    if(!list.length)list=[{}];
+    drafts=list.map(function(c){
+      var merged=Object.assign({},geral);
+      Object.keys(c).forEach(function(k){if(c[k]!==""&&c[k]!=null)merged[k]=c[k]});
+      if(geral.beneficiosDetalhe)merged.obs="Benefícios: "+geral.beneficiosDetalhe;
+      return normalize(merged,link);
+    });
+    saveDrafts();
+    setStatus(drafts.length+" cargo(s) extraído(s). Confira os campos antes de salvar (principalmente vagas e benefícios).",false);
     renderDrafts();
   }catch(e){
     var m;
     if(e.status===401||e.status===403)m="Chave da API recusada. Confira a chave e o provedor.";
-    else if(e.status===429)m="Limite gratuito atingido. Espere um minuto e tente de novo, ou use um trecho menor do edital.";
+    else if(e.status===429)m="Limite gratuito atingido mesmo após esperar. Tente de novo em alguns minutos.";
     else if(e.status===404||/model/i.test(e.message||""))m="O modelo \""+cfg.model+"\" não está disponível nesta conta. Em \"Configurar modelo de IA\", troque por openai/gpt-oss-120b ou llama-3.1-8b-instant.";
     else if(e.status===413)m="O texto é grande demais para o plano gratuito. Cole só as partes principais do edital.";
     else if(e instanceof TypeError)m="Não consegui falar com o provedor ("+cfg.url+"). Confira a conexão e o endereço.";
@@ -283,7 +323,7 @@ async function readPdf(file){
     }
     var text=out.join("\n\n").trim();
     if(text.length<200)throw new Error("O PDF parece ser escaneado (sem texto). Use um PDF com texto selecionável.");
-    $("in-text").value=text;
+    $("in-text").value=text;saveDrafts();
     setStatus("PDF lido ("+pdf.numPages+" páginas). Clique em \"Extrair dados\".",false);
   }catch(e){setStatus("Não foi possível ler o PDF: "+e.message,true)}
 }
@@ -428,7 +468,17 @@ $("cfg-preset").addEventListener("change",function(){
 });
 ["cfg-url","cfg-model","cfg-key"].forEach(function(id){$(id).addEventListener("change",saveCfg)});
 
+var saveTimer=null;
+function saveDraftsSoon(){clearTimeout(saveTimer);saveTimer=setTimeout(saveDrafts,400)}
+$("in-text").addEventListener("input",saveDraftsSoon);
+$("in-link").addEventListener("input",saveDraftsSoon);
+$("drafts").addEventListener("change",function(){readDraftForms(-1);saveDrafts()});
+try{
+  var dr=JSON.parse(lsGet(DRAFT)||"null");
+  if(dr){$("in-text").value=dr.text||"";$("in-link").value=dr.link||"";drafts=Array.isArray(dr.drafts)?dr.drafts:[]}
+}catch(e){}
 load();
+if(drafts.length)renderDrafts(true);
 var cfg0=loadCfg();applyCfgToUI(cfg0);
 if(!cfg0.key&&cfg0.preset!=="ollama")$("settings").open=true;
 renderAll();
