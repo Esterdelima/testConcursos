@@ -15,6 +15,7 @@ var FIELDS=[
  ["modalidade","Modalidade","select",MODAL],
  ["vagasAC","Vagas AC","number"],
  ["vagasCotas","Vagas Cotas","number"],
+ ["vagasTotal","Vagas Total (quando não separado)","number"],
  ["cr","Cadastro Reserva","text"],
  ["remuneracao","Remuneração Inicial (R$)","number"],
  ["beneficios","Benefícios (R$)","number"],
@@ -32,11 +33,11 @@ var FIELDS=[
  ["obs","Observações (benefícios, notas)","textarea",null,"full"]
 ];
 /* ordem das colunas da aba Concursos da planilha de controle */
-var SHEET_ORDER=["id","orgao","cargo","banca","esfera","uf","modalidade","vagasAC","vagasCotas","cr","remuneracao","beneficios","carga","status","inicio","fim","prova","taxa","requisitos","subarea","disciplinas","vou","link","obs"];
+var SHEET_ORDER=["id","orgao","cargo","banca","esfera","uf","modalidade","vagasAC","vagasCotas","cr","remuneracao","beneficios","carga","status","inicio","fim","prova","taxa","requisitos","subarea","disciplinas","vou","link","obs","vagasTotal"];
 var HEADERS={id:"ID"};
 FIELDS.forEach(function(f){HEADERS[f[0]]=f[1]});
 HEADERS.prova="Data da Prova";
-var NUMERIC={vagasAC:1,vagasCotas:1,remuneracao:1,beneficios:1,carga:1,taxa:1};
+var NUMERIC={vagasTotal:1,vagasAC:1,vagasCotas:1,remuneracao:1,beneficios:1,carga:1,taxa:1};
 
 var PRESETS={
   groq:{url:"https://api.groq.com/openai/v1/chat/completions",model:"openai/gpt-oss-120b",ph:"gsk_..."},
@@ -76,7 +77,7 @@ function el(tag,attrs,kids){
 function fmtDate(s){if(!s)return"";var p=String(s).split("-");return p.length===3?p[2]+"/"+p[1]+"/"+p[0]:s}
 function fmtBRL(n){return(n===""||n==null||isNaN(n))?"":Number(n).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}
 function daysTo(s){if(!s)return null;var d=new Date(s+"T00:00:00");var t=new Date();t.setHours(0,0,0,0);return Math.round((d-t)/864e5)}
-function totalVagas(r){return(+r.vagasAC||0)+(+r.vagasCotas||0)}
+function totalVagas(r){var t=(+r.vagasAC||0)+(+r.vagasCotas||0);return t||(+r.vagasTotal||0)}
 
 /* ---------- formulário ---------- */
 var formSeq=0;
@@ -160,72 +161,88 @@ function saveAllDrafts(){
 function loadCfg(){var c={};try{c=JSON.parse(lsGet(CFG)||"{}")}catch(e){}
   c.preset=c.preset||"groq";
   var p=PRESETS[c.preset];if(c.model==="llama-3.3-70b-versatile")c.model="";c.url=c.url||p.url;c.model=c.model||p.model;c.key=c.key||"";return c}
-function applyCfgToUI(c){$("cfg-preset").value=c.preset;$("cfg-url").value=c.url;$("cfg-model").value=c.model;$("cfg-key").value=c.key;$("cfg-key").placeholder=PRESETS[c.preset].ph}
-function readCfgFromUI(){return{preset:$("cfg-preset").value,url:$("cfg-url").value.trim(),model:$("cfg-model").value.trim(),key:$("cfg-key").value.trim()}}
+function applyCfgToUI(c){$("cfg-preset").value=c.preset;$("cfg-url").value=c.url;$("cfg-model").value=c.model;$("cfg-key").value=c.key;$("cfg-extra").value=c.extra||"";$("cfg-key").placeholder=PRESETS[c.preset].ph}
+function readCfgFromUI(){return{preset:$("cfg-preset").value,url:$("cfg-url").value.trim(),model:$("cfg-model").value.trim(),key:$("cfg-key").value.trim(),extra:$("cfg-extra").value}}
 function saveCfg(){lsSet(CFG,JSON.stringify(readCfgFromUI()))}
 
 /* ---------- selecionar trechos do edital (limites do plano gratuito) ---------- */
-var MAX_CHARS=11000;
-var TOPIC_GERAL=/(banca|organizad|realiza[çc][ãa]o|inscri|taxa|prova objetiva|cronograma|data da prova|benef[ií]cio|aux[ií]lio|vale[- ]|plano de sa[úu]de|assist[êe]ncia|gratifica|remunera|vencimento|sal[áa]rio|carga hor|jornada|regime|requisit|escolaridade|forma[çc][ãa]o|modalidade|presencial|remoto|teletrabalho|h[ií]brido|disciplina|conhecimentos|lota[çc][ãa]o|localidade)/i;
-var TOPIC_CARGOS=/(vaga|perfil|cargo|especialidade|reserva|cota|PcD|ampla|remunera|vencimento|sal[áa]rio|R\$|taxa|requisit|escolaridade|forma[çc][ãa]o|conhecimentos|disciplina|localidade|lota[çc][ãa]o)/i;
-function pick(text,re,budget){
-  text=text.replace(/[ \t]+/g," ").replace(/\n{3,}/g,"\n\n");
+var MAX_CHARS=11000, WIN=1400;
+var T_GERAL=[
+ [/banca|organizad|realiza[çc][ãa]o do concurso/gi,3],[/inscri[çc]/gi,2],[/cronograma/gi,3],[/taxa/gi,3],[/prova/gi,1],
+ [/remunera|vencimento|retribui[çc]/gi,4],[/aux[ií]lio|benef[ií]cio|vale[- ]|plano de sa[úu]de/gi,4],
+ [/regime de trabalho|carga hor|jornada|dedica[çc][ãa]o exclusiva/gi,3],[/R\$/g,2],[/presencial|remoto|teletrabalho|h[ií]brido/gi,1],
+ [/disciplina|conhecimentos/gi,1],[/\b\d{2}\/\d{2}\/\d{4}\b/g,1]
+];
+var T_CARGOS=[
+ [/vaga/gi,3],[/quadro/gi,2],[/campus|localidade|lota[çc][ãa]o|unidade/gi,2],[/n[º°o]\s*de vagas|total de vagas|total/gi,3],
+ [/\bAC\b|ampla concorr|PcD|\bPN\b|\bPI\b|\bPQ\b|cota/g,2],[/[áa]rea de conhecimento|especialidade|perfil|cargo/gi,3],
+ [/escolaridade|habilita|gradua[çc][ãa]o|licenciatura|bacharelado|requisito/gi,2],[/remunera|vencimento/gi,1],[/R\$/g,1],
+ [/quadro\s+(?:geral\s+de\s+vagas|com\s+detalhamento|de\s+vagas|i-?[ab]\b)|n[º°o]\s*de\s+vagas|detalhamento\s+das\s+vagas|distribui[çc][ãa]o\s+das\s+vagas|\n\s*\d*\.?\s*DAS VAGAS/gi,25]
+];
+function cleanText(t){return t.replace(/[ \t]+/g," ").replace(/ ?\n ?/g,"\n").replace(/\n{3,}/g,"\n\n")}
+function scoreWin(w,terms){
+  var s=0;terms.forEach(function(t){var m=w.match(t[0]);if(m)s+=t[1]*Math.min(m.length,8)});return s;
+}
+/* escolhe blocos contínuos (tabelas inteiras) com mais termos do tema, em vez de linhas soltas */
+function pick(text,terms,budget,headChars){
+  text=cleanText(text);
   if(text.length<=budget)return text;
-  var lines=text.split("\n"), keep={}, size=0, out=[], head=Math.floor(budget*0.25);
-  var h=text.slice(0,head);size=h.length;
-  var hl=h.split("\n").length;
-  for(var i=hl;i<lines.length&&size<budget;i++){
-    if(re.test(lines[i])){
-      for(var k=i;k<=Math.min(i+2,lines.length-1);k++){
-        if(!keep[k]){keep[k]=1;var l=lines[k].trim().slice(0,500);if(l){out.push(l);size+=l.length+1}}
-      }
-    }
+  var head=text.slice(0,headChars), lines=text.slice(headChars).split("\n");
+  var wins=[],cur=[],len=0;
+  lines.forEach(function(l){cur.push(l);len+=l.length+1;if(len>=WIN){wins.push(cur.join("\n"));cur=[];len=0}});
+  if(cur.length)wins.push(cur.join("\n"));
+  var raw=wins.map(function(w){return scoreWin(w,terms)});
+  var anchors=terms.filter(function(t){return t[1]>=25});
+  var room=budget-head.length, chosen={}, count=0;
+  function add(i){if(i<0||i>=wins.length||chosen[i])return true;if(wins[i].length+8>room)return false;chosen[i]=1;room-=wins[i].length+8;count++;return true}
+  /* 1) onde há um título de quadro/tabela, leva a janela e as 3 seguintes (a tabela inteira) */
+  var limit=budget*0.7, used=0;
+  var hits=[];
+  wins.forEach(function(w,i){if(anchors.some(function(t){t[0].lastIndex=0;return t[0].test(w)}))hits.push(i)});
+  hits.sort(function(a,b){return raw[b]-raw[a]});
+  for(var h=0;h<hits.length&&used<limit;h++){
+    for(var k=hits[h];k<=hits[h]+3&&k<wins.length;k++){if(!chosen[k]){if(!add(k))break;used+=wins[k].length}}
   }
-  return h+"\n[...trechos selecionados do restante do edital...]\n"+out.join("\n");
+  /* 2) completa com as janelas de maior pontuação */
+  var sc=wins.map(function(w,i){return{i:i,s:raw[i]+0.8*(raw[i-1]||0)+0.5*(raw[i+1]||0)}}).sort(function(a,b){return b.s-a.s});
+  for(var j=0;j<sc.length&&room>0;j++){if(sc[j].s<=0)break;add(sc[j].i)}
+  var idx=Object.keys(chosen).map(Number).sort(function(a,b){return a-b});
+  return head+"\n"+idx.map(function(i){return"[...]\n"+wins[i]}).join("\n");
 }
 
-/* ---------- extração com Llama / gpt-oss ---------- */
+/* ---------- montagem dos prompts (texto em instrucoes.js) ---------- */
+function extraText(){
+  var e=($("cfg-extra").value||"").trim();
+  return e?"INSTRUÇÕES ADICIONAIS DO USUÁRIO (siga com prioridade):\n"+e+"\n\n":"";
+}
+function fill(tpl,material){
+  var I=window.INSTRUCOES;
+  return tpl.replace("{{REGRAS}}",I.regras).replace(/\{\{HOJE\}\}/g,new Date().toISOString().slice(0,10))
+    .replace("{{SUBAREAS}}",SUBAREA.join(", ")).replace(/\{\{EXTRA\}\}/g,extraText()).replace("{{MATERIAL}}",function(){return material});
+}
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 function setStatus(t,err){var s=$("extract-status");s.textContent=t;s.className="status-line"+(err?" err":"")}
-var TODAY=function(){return new Date().toISOString().slice(0,10)};
-var REGRAS=
-"Regras: use \"\" quando a informação não estiver no material; nunca invente. Datas no formato AAAA-MM-DD. Números sem símbolo e sem separador de milhar (ex.: 8500.50). "+
-"AC = Ampla Concorrência (vagas abertas a todos, sem reserva). Cotas = vagas reservadas (PcD, pretos e pardos PP, indígenas PI, quilombolas PQ). ";
-function promptGeral(material){
-  return "Você extrai dados de editais de concursos públicos brasileiros. Responda APENAS com um objeto JSON com os campos abaixo, valendo para o concurso como um todo.\n"+REGRAS+"\n"+
-  "orgao (string), banca (organizadora/realizadora do concurso), esfera (\"Federal\"|\"Estadual\"|\"Municipal\"), "+
-  "modalidade (\"Presencial\"|\"Híbrido\"|\"Remoto\"|\"Não informado\", conforme o regime de trabalho), carga (horas semanais, número), "+
-  "beneficios (número: soma MENSAL em reais de todos os auxílios/benefícios em dinheiro citados, como alimentação/refeição, saúde, creche, transporte; some os valores; \"\" se não houver valores), "+
-  "beneficiosDetalhe (string: lista curta dos benefícios com valores, ex.: \"Auxílio-alimentação R$ 1.200; plano de saúde\"), "+
-  "status (\"Previsto\"|\"Edital Publicado\"|\"Inscrições Abertas\"|\"Inscrições Encerradas\"|\"Prova Realizada\"|\"Homologado\"), "+
-  "inicio (início das inscrições), fim (fim das inscrições), prova (data da prova objetiva), "+
-  "taxa (número: valor da taxa de inscrição; se variar por nível, use a de nível superior), "+
-  "disciplinas (string: disciplinas/conhecimentos de TI cobrados, separados por vírgula).\n"+
-  "Hoje é "+TODAY()+"; decida o status pelas datas.\n\nMATERIAL:\n"+material;
+
+/* ---------- resposta do modelo ---------- */
+function parseObj(content){
+  try{var m=content.match(/\{[\s\S]*\}/);return m?JSON.parse(m[0]):{}}catch(e){return {}}
 }
-function promptCargos(material){
-  return "Você extrai dados de editais de concursos públicos brasileiros. Responda APENAS com JSON no formato {\"cargos\":[...]}, com UM item por cargo/perfil/especialidade.\n"+REGRAS+"\n"+
-  "Se o mesmo perfil tiver vagas em várias localidades, faça um único item, SOME as vagas e liste as localidades em uf (ex.: \"Fortaleza/CE, João Pessoa/PB\").\n"+
-  "Campos de cada item: cargo (nome do cargo e perfil/especialidade), uf (localidade/lotação), "+
-  "vagasAC (número: vagas imediatas de ampla concorrência, coluna AC), vagasCotas (número: soma das vagas imediatas reservadas PcD+PP+PI+PQ), "+
-  "cr (número: total de cadastro de reserva do cargo, incluindo ampla e cotas; \"\" se não houver), "+
-  "remuneracao (número em reais: remuneração/vencimento inicial do cargo), taxa (número: taxa de inscrição do cargo, se específica), "+
-  "requisitos (string: formação exigida), "+
-  "subarea (uma de: "+SUBAREA.join(", ")+").\n\nMATERIAL:\n"+material;
-}
-function salvage(content){
-  try{var m=content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);if(m){var v=JSON.parse(m[0]);return Array.isArray(v)?v:(v.cargos||v.concursos||[v])}}catch(e){}
-  var i=content.indexOf("[");if(i<0)return [];
-  var out=[],depth=0,start=-1,inStr=false,esc=false;
+function parseCargos(content){
+  var resumo=(content.match(/"resumoVagas"\s*:\s*"((?:[^"\\]|\\.)*)"/)||[])[1]||"";
+  var list=[];
+  try{var m=content.match(/\{[\s\S]*\}/);if(m){var v=JSON.parse(m[0]);list=Array.isArray(v)?v:(v.cargos||[]);return{resumo:v.resumoVagas||resumo,list:list}}}catch(e){}
+  var i=content.indexOf('"cargos"');i=i<0?content.indexOf("["):content.indexOf("[",i);
+  if(i<0)return{resumo:resumo,list:[]};
+  var depth=0,start=-1,inStr=false,esc=false;
   for(var k=i+1;k<content.length;k++){
     var c=content[k];
     if(inStr){if(esc)esc=false;else if(c==="\\")esc=true;else if(c==='"')inStr=false;continue}
     if(c==='"'){inStr=true;continue}
     if(c==="{"){if(depth===0)start=k;depth++}
-    else if(c==="}"){depth--;if(depth===0&&start>=0){try{out.push(JSON.parse(content.slice(start,k+1)))}catch(e){}start=-1}}
+    else if(c==="}"){depth--;if(depth===0&&start>=0){try{list.push(JSON.parse(content.slice(start,k+1)))}catch(e){}start=-1}}
   }
-  return out;
+  return{resumo:resumo,list:list};
 }
-function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 async function callLlm(cfg,prompt,opts){
   opts=opts||{};
   var headers={"Content-Type":"application/json"};
@@ -248,8 +265,7 @@ async function callLlm(cfg,prompt,opts){
     if(opts.format!==false&&code==="json_validate_failed")return callLlm(cfg,prompt,Object.assign({},opts,{format:false}));
     var err=new Error(msg);err.status=res.status;throw err;
   }
-  var content=JSON.parse(raw).choices[0].message.content||"";
-  return content;
+  return JSON.parse(raw).choices[0].message.content||"";
 }
 function normalize(o,link){
   var d={};
@@ -267,32 +283,33 @@ function normalize(o,link){
   if(!d.vou)d.vou="Talvez";
   return d;
 }
-function parseObj(content){
-  try{var m=content.match(/\{[\s\S]*\}/);return m?JSON.parse(m[0]):{}}catch(e){return {}}
-}
 async function extract(){
   var text=$("in-text").value.trim(), link=$("in-link").value.trim();
   if(!text){setStatus("Cole o texto do edital, descreva o concurso ou envie o PDF.",true);return}
+  if(!window.INSTRUCOES){setStatus("Falta o arquivo instrucoes.js no site. Envie-o ao GitHub junto com index.html e app.js.",true);return}
   var cfg=readCfgFromUI();saveCfg();
   if(!cfg.url||!cfg.model){setStatus("Configure o endereço da API e o modelo.",true);$("settings").open=true;return}
   if(cfg.preset!=="ollama"&&!cfg.key){setStatus("Informe sua chave da API em \"Configurar modelo de IA\".",true);$("settings").open=true;return}
   var btn=$("btn-extract");btn.disabled=true;
   try{
-    setStatus("Passo 1 de 2: dados gerais (banca, datas, benefícios)…",false);
-    var geralTxt=await callLlm(cfg,promptGeral(pick(text,TOPIC_GERAL,MAX_CHARS)),{maxOut:2500});
-    var geral=parseObj(geralTxt);
-    setStatus("Passo 2 de 2: cargos, vagas e remuneração…",false);
-    var cargosTxt=await callLlm(cfg,promptCargos(pick(text,TOPIC_CARGOS,MAX_CHARS)),{maxOut:6000});
-    var list=salvage(cargosTxt).filter(function(o){return o&&typeof o==="object"});
+    setStatus("Passo 1 de 2: dados gerais (banca, datas, remuneração, benefícios)…",false);
+    var geral=parseObj(await callLlm(cfg,fill(window.INSTRUCOES.geral,pick(text,T_GERAL,15000,8000)),{maxOut:2500}));
+    setStatus("Passo 2 de 2: cargos, áreas e vagas…",false);
+    var pc=parseCargos(await callLlm(cfg,fill(window.INSTRUCOES.cargos,pick(text,T_CARGOS,MAX_CHARS,1500)),{maxOut:6000}));
+    var list=pc.list.filter(function(o){return o&&typeof o==="object"});
     if(!list.length)list=[{}];
+    var notas=[];
+    if(geral.beneficiosDetalhe)notas.push("Benefícios: "+geral.beneficiosDetalhe);
+    if(geral.remuneracaoDetalhe)notas.push("Remuneração: "+geral.remuneracaoDetalhe);
+    if(pc.resumo)notas.push("Quadro geral de vagas: "+pc.resumo);
     drafts=list.map(function(c){
       var merged=Object.assign({},geral);
       Object.keys(c).forEach(function(k){if(c[k]!==""&&c[k]!=null)merged[k]=c[k]});
-      if(geral.beneficiosDetalhe)merged.obs="Benefícios: "+geral.beneficiosDetalhe;
+      merged.obs=notas.join(" | ");
       return normalize(merged,link);
     });
     saveDrafts();
-    setStatus(drafts.length+" cargo(s) extraído(s). Confira os campos antes de salvar (principalmente vagas e benefícios).",false);
+    setStatus(drafts.length+" cargo(s)/área(s) extraído(s). Confira os campos antes de salvar (principalmente vagas e valores).",false);
     renderDrafts();
   }catch(e){
     var m;
@@ -311,6 +328,23 @@ function manual(){
 }
 
 /* ---------- PDF ---------- */
+/* reconstrói as linhas das tabelas do PDF (agrupa por altura, ordena por posição) */
+function pageText(tc){
+  var rows={};
+  tc.items.forEach(function(it){
+    if(!it.str||!it.transform)return;
+    var y=Math.round(it.transform[5]/3);
+    (rows[y]=rows[y]||[]).push({x:it.transform[4],w:it.width||0,s:it.str});
+  });
+  return Object.keys(rows).map(Number).sort(function(a,b){return b-a}).map(function(y){
+    var r=rows[y].sort(function(a,b){return a.x-b.x}), out="", end=null;
+    r.forEach(function(c){
+      if(end!==null){var gap=c.x-end;out+=gap>12?" | ":(gap>1?" ":"")}
+      out+=c.s;end=c.x+c.w;
+    });
+    return out.trim();
+  }).filter(Boolean).join("\n");
+}
 async function readPdf(file){
   if(!window.pdfjsLib){setStatus("Leitor de PDF não carregou. Cole o texto do edital.",true);return}
   pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
@@ -319,7 +353,7 @@ async function readPdf(file){
     var pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise, out=[];
     for(var p=1;p<=pdf.numPages;p++){
       var page=await pdf.getPage(p), tc=await page.getTextContent();
-      out.push(tc.items.map(function(i){return i.str+(i.hasEOL?"\n":" ")}).join(""));
+      out.push(pageText(tc));
     }
     var text=out.join("\n\n").trim();
     if(text.length<200)throw new Error("O PDF parece ser escaneado (sem texto). Use um PDF com texto selecionável.");
@@ -466,7 +500,7 @@ $("cfg-preset").addEventListener("change",function(){
   var p=PRESETS[$("cfg-preset").value];
   $("cfg-url").value=p.url;$("cfg-model").value=p.model;$("cfg-key").placeholder=p.ph;saveCfg();
 });
-["cfg-url","cfg-model","cfg-key"].forEach(function(id){$(id).addEventListener("change",saveCfg)});
+["cfg-url","cfg-model","cfg-key","cfg-extra"].forEach(function(id){$(id).addEventListener("change",saveCfg)});
 
 var saveTimer=null;
 function saveDraftsSoon(){clearTimeout(saveTimer);saveTimer=setTimeout(saveDrafts,400)}

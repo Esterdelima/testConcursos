@@ -131,8 +131,11 @@ a{color:var(--accent)}
       <label for="cfg-url" class="wide">Endereço da API<input id="cfg-url" type="url"></label>
       <label for="cfg-model" class="wide">Modelo<input id="cfg-model" type="text"></label>
       <label for="cfg-key" class="wide">Chave da API<input id="cfg-key" type="password" autocomplete="off" placeholder="gsk_..."></label>
+      <label for="cfg-extra" class="full">Instruções extras para a IA (opcional, valem para as próximas extrações)
+        <textarea id="cfg-extra" rows="3" placeholder="Ex.: considere só as áreas de Informática; remuneração = vencimento da graduação; cadastre cada campus como linha separada."></textarea>
+      </label>
       <div class="full">
-        <p class="hint">Crie uma chave grátis em console.groq.com/keys. Ela fica só neste navegador (localStorage) e é enviada apenas ao provedor escolhido. Não coloque a chave no repositório.</p>
+        <p class="hint">As instruções-base ficam no arquivo instrucoes.js do site. Crie uma chave grátis em console.groq.com/keys. Ela fica só neste navegador (localStorage) e é enviada apenas ao provedor escolhido. Não coloque a chave no repositório.</p>
       </div>
     </div>
   </details>
@@ -181,11 +184,12 @@ a{color:var(--accent)}
       <tbody id="tbody"></tbody>
     </table></div>
   </section>
-  <p class="foot">Os dados ficam no armazenamento deste navegador. Atualizar o site não apaga nada. Limpar os dados do navegador apaga; use "Backup (.json)" para guardar uma cópia. Versão 3.</p>
+  <p class="foot">Os dados ficam no armazenamento deste navegador. Atualizar o site não apaga nada. Limpar os dados do navegador apaga; use "Backup (.json)" para guardar uma cópia. Versão 4.</p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="app.js?v=3"></script>
+<script src="instrucoes.js?v=4"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>
