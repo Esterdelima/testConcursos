@@ -163,7 +163,7 @@ function readCfgFromUI(){return{preset:$("cfg-preset").value,url:$("cfg-url").va
 function saveCfg(){lsSet(CFG,JSON.stringify(readCfgFromUI()))}
 
 /* ---------- reduzir edital longo (limites do plano gratuito) ---------- */
-var MAX_CHARS=16000;
+var MAX_CHARS=12000;
 function condense(text){
   text=text.replace(/[ \t]+/g," ").replace(/\n{3,}/g,"\n\n");
   if(text.length<=MAX_CHARS)return text;
@@ -190,23 +190,40 @@ function buildPrompt(material){
   "subarea (uma de: "+SUBAREA.join(", ")+"), disciplinas (string, disciplinas de TI cobradas, separadas por vírgula).\n"+
   "Hoje é "+new Date().toISOString().slice(0,10)+"; use isso para decidir o status pelas datas. Números sem símbolo nem separador de milhar (ex.: 8500.50).\n\nMATERIAL:\n"+material;
 }
-async function callLlm(cfg,prompt){
+function salvage(content){
+  /* aceita JSON completo ou cortado: devolve os objetos de cargo que estiverem inteiros */
+  try{var m=content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);if(m){var v=JSON.parse(m[0]);return Array.isArray(v)?v:(v.cargos||v.concursos||[v])}}catch(e){}
+  var i=content.indexOf("[");if(i<0)return [];
+  var out=[],depth=0,start=-1,inStr=false,esc=false;
+  for(var k=i+1;k<content.length;k++){
+    var c=content[k];
+    if(inStr){if(esc)esc=false;else if(c==="\\")esc=true;else if(c==='"')inStr=false;continue}
+    if(c==='"'){inStr=true;continue}
+    if(c==="{"){if(depth===0)start=k;depth++}
+    else if(c==="}"){depth--;if(depth===0&&start>=0){try{out.push(JSON.parse(content.slice(start,k+1)))}catch(e){}start=-1}}
+  }
+  return out;
+}
+async function callLlm(cfg,prompt,useFormat){
   var headers={"Content-Type":"application/json"};
   if(cfg.key)headers.Authorization="Bearer "+cfg.key;
   var body={model:cfg.model,temperature:0,messages:[
-    {role:"system",content:"Você responde somente com JSON válido."},
+    {role:"system",content:"Você responde somente com JSON válido, sem texto antes ou depois."},
     {role:"user",content:prompt}]};
-  if(cfg.preset==="groq"||cfg.preset==="openrouter")body.response_format={type:"json_object"};
+  var reasoning=/gpt-oss|qwen3/i.test(cfg.model);
+  if(reasoning){body.reasoning_effort="low";body.max_completion_tokens=4500}
+  if(useFormat&&!reasoning&&(cfg.preset==="groq"||cfg.preset==="openrouter"))body.response_format={type:"json_object"};
   var res=await fetch(cfg.url,{method:"POST",headers:headers,body:JSON.stringify(body)});
   var raw=await res.text();
   if(!res.ok){
-    var msg=raw;try{msg=JSON.parse(raw).error.message||raw}catch(e){}
+    var msg=raw,code="";try{var j=JSON.parse(raw).error;msg=j.message||raw;code=j.code||""}catch(e){}
+    if(useFormat&&code==="json_validate_failed")return callLlm(cfg,prompt,false);
     var err=new Error(msg);err.status=res.status;throw err;
   }
-  var content=JSON.parse(raw).choices[0].message.content;
-  var m=content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-  if(!m)throw new Error("A resposta do modelo não veio em JSON.");
-  return JSON.parse(m[0]);
+  var content=JSON.parse(raw).choices[0].message.content||"";
+  var list=salvage(content);
+  if(!list.length)throw new Error("O modelo não devolveu cargos legíveis. Tente de novo ou use um trecho menor do edital.");
+  return list;
 }
 function normalize(o,link){
   var d={};
@@ -232,8 +249,7 @@ async function extract(){
   if(cfg.preset!=="ollama"&&!cfg.key){setStatus("Informe sua chave da API em \"Configurar modelo de IA\".",true);$("settings").open=true;return}
   var btn=$("btn-extract");btn.disabled=true;setStatus("Lendo o edital com "+cfg.model+"…",false);
   try{
-    var out=await callLlm(cfg,buildPrompt(condense(text)));
-    var list=Array.isArray(out)?out:(out.cargos||out.concursos||[out]);
+    var list=await callLlm(cfg,buildPrompt(condense(text)),true);
     drafts=list.filter(function(o){return o&&typeof o==="object"}).map(function(o){return normalize(o,link)});
     if(!drafts.length)throw new Error("Nenhum cargo encontrado no texto.");
     setStatus(drafts.length+" cargo(s) extraído(s). Confira os campos antes de salvar.",false);
